@@ -97,29 +97,76 @@
 
   $$('.gem-art').forEach(buildArt);
 
-  /* catena di gemme del percorso: si accende con lo scorrimento */
-  const chain = $('.chain');
-  let chainGems = [];
-  const buildChain = () => {
-    if (!chain) return;
-    const h = chain.clientHeight || 400, n = Math.max(5, Math.floor(h / 34));
-    let out = '';
-    for (let i = 0; i < n; i++) {
-      const y = 10 + i * (h - 20) / (n - 1);
-      const type = i % 6 === 3 ? 'spark' : i % 4 === 1 ? 'rhomb' : 'round';
-      out += `<g transform="translate(25 ${f(y)})"><g class="cg">${gemMarkup(type, TINTS[i % TINTS.length], type === 'round' ? 8.5 : 7)}</g></g>`;
+  /* ---------- hero: il percorso del grillz, guidato dallo scorrimento ---------- */
+  const hero = $('.hero');
+  const clamp01 = (v) => Math.min(1, Math.max(0, v));
+  const STEPS = 5;
+  const rail = $$('.rail li', hero), caps = $$('.cap', hero);
+  const outline = $('.draw__outline', hero), divs = [], dayDots = $$('.days i', hero);
+  const ring = $('.gem-art--ring', hero);
+
+  // pulsanti del percorso: una gemma per passo
+  const railKinds = ['round', 'rhomb', 'spark', 'heart', 'round'];
+  $$('.rail svg', hero).forEach((svg, i) => { svg.innerHTML = gemMarkup(railKinds[i], TINTS[(i * 2) % TINTS.length], 8); });
+
+  // grillz disegnato: denti, gemme e pietre sulla curva
+  (() => {
+    const q = (t, a, b, c) => (1 - t) * (1 - t) * a + 2 * t * (1 - t) * b + t * t * c;
+    const top = (t) => [q(t, 46, 200, 354), q(t, 96, 196, 96)], bot = (t) => [q(t, 62, 200, 338), q(t, 140, 232, 140)];
+    let lines = '', gems = '';
+    for (let i = 1; i < 8; i++) {
+      const [x1, y1] = top(i / 8), [x2, y2] = bot(i / 8);
+      lines += `<line class="draw__div" pathLength="1" x1="${f(x1)}" y1="${f(y1)}" x2="${f(x2)}" y2="${f(y2)}"/>`;
     }
-    chain.innerHTML = `<svg viewBox="0 0 50 ${h}" preserveAspectRatio="xMidYMin meet" role="presentation" focusable="false">${out}</svg>`;
-    chainGems = $$('.cg', chain);
+    [[.5, 'spark', 9], [.25, 'round', 4.6], [.75, 'round', 4.6], [.125, 'rhomb', 3.4], [.875, 'rhomb', 3.4]].forEach(([t, type, r], i) => {
+      const [x1, y1] = top(t), [x2, y2] = bot(t);
+      gems += `<g transform="translate(${f((x1 + x2) / 2)} ${f((y1 + y2) / 2)})">${gemMarkup(type, TINTS[(i * 2 + 1) % TINTS.length], r)}</g>`;
+    });
+    $('.draw__divs', hero).innerHTML = lines;
+    $('.draw__gems', hero).innerHTML = gems;
+    divs.push(...$$('.draw__div', hero));
+  })();
+
+  let curStep = -1, lastOutline = -1, lastDivs = -1, lastDays = -1;
+  const heroFrame = () => {
+    const range = hero.offsetHeight - innerHeight;
+    if (range <= 0) return;
+    const p = clamp01(-hero.getBoundingClientRect().top / range);
+    const raw = p * STEPS, idx = Math.min(STEPS - 1, Math.floor(raw)), lp = raw - idx;
+
+    if (idx !== curStep) {
+      curStep = idx;
+      hero.dataset.step = idx;
+      caps.forEach((c, i) => c.classList.toggle('on', i === idx));
+      rail.forEach((li, i) => {
+        li.classList.toggle('on', i <= idx);
+        li.classList.toggle('cur', i === idx);
+        li.classList.toggle('done', i < idx);
+        const b = $('button', li);
+        if (i === idx) b.setAttribute('aria-current', 'step'); else b.removeAttribute('aria-current');
+      });
+      ring.classList.toggle('in', idx === STEPS - 1);
+    }
+
+    const draw = idx === 0 ? 0 : idx === 1 ? lp : 1;
+    const o = +(1 - clamp01(draw / .6)).toFixed(3), d = +(1 - clamp01((draw - .5) / .5)).toFixed(3);
+    if (o !== lastOutline) { lastOutline = o; outline.style.strokeDashoffset = o; }
+    if (d !== lastDivs) { lastDivs = d; divs.forEach((l) => { l.style.strokeDashoffset = d; }); }
+
+    const days = idx < 2 ? 0 : idx === 2 ? Math.ceil(lp * 7) : 7;
+    if (days !== lastDays) { lastDays = days; dayDots.forEach((el, i) => el.classList.toggle('on', i < days)); }
   };
-  buildChain();
-  let rt; addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => { buildChain(); request(); }, 200); });
+
+  $$('.rail button', hero).forEach((b) => b.addEventListener('click', () => {
+    const range = hero.offsetHeight - innerHeight, top = scrollY + hero.getBoundingClientRect().top;
+    scrollTo({ top: top + range * (+b.dataset.go + .5) / STEPS, behavior: reduce ? 'auto' : 'smooth' });
+  }));
 
   /* ---------- comparsa al scroll ---------- */
   const io = new IntersectionObserver((es) => {
     es.forEach((e) => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } });
   }, { threshold: 0.15, rootMargin: '0px 0px -6% 0px' });
-  $$('.reveal, .img-reveal, .steps li, .gem-art').forEach((el) => io.observe(el));
+  $$('.reveal, .img-reveal, .gem-art:not([data-manual])').forEach((el) => io.observe(el));
 
   /* ---------- menu mobile ---------- */
   const burger = $('.burger'), menu = $('#menu-mobile');
@@ -141,7 +188,7 @@
   }));
 
   /* ---------- scorrimento: barra, header, catena, parallasse con inerzia ---------- */
-  const top = $('.top'), bar = $('.progress span'), steps = $('.steps');
+  const top = $('.top'), bar = $('.progress span');
   const par = reduce ? [] : $$('[data-speed]').map((el) => ({ el, s: +el.dataset.speed, y: 0 }));
   let lastY = scrollY, ticking = false;
 
@@ -152,11 +199,7 @@
     top.classList.toggle('hide', y > lastY && y > 400 && menu.hidden);
     lastY = y;
 
-    if (steps && chainGems.length) {
-      const r = steps.getBoundingClientRect();
-      const p = Math.min(1, Math.max(0, (innerHeight * 0.72 - r.top) / r.height));
-      chainGems.forEach((g, i) => g.classList.toggle('on', (i + 1) / chainGems.length <= p + 0.02));
-    }
+    heroFrame();
 
     let moving = false;
     par.forEach((p) => {
@@ -172,6 +215,7 @@
   }
   function request() { if (!ticking) { ticking = true; requestAnimationFrame(frame); } }
   addEventListener('scroll', request, { passive: true });
+  addEventListener('resize', request);
   request();
 
   /* ---------- cursore e pulsanti magnetici (solo con mouse) ---------- */
